@@ -1,3 +1,23 @@
+2010-06-05  Herbert Xu <herbert@gondor.apana.org.au>
+
+	* Release 0.5.6.1.
+
+2010-05-29  Herbert Xu <herbert@gondor.apana.org.au>
+
+	* Continue after EINTR in read(1) with no pending signals.
+
+2010-05-27  Herbert Xu <herbert@gondor.apana.org.au>
+
+	* Fix wait regression where it does not wait for all jobs.
+
+2010-05-27  Jilles Tjoelker <jilles@stack.nl>
+
+	* Fix corruption of redirections with byte 0x81.
+
+2010-05-03  Gerrit Pape <pape@smarden.org>
+
+	* Fix command -- crash.
+
 2010-04-02  Herbert Xu <herbert@gondor.apana.org.au>
 
 	* Make trap signal name/number errors non-fatal.
