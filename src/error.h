@@ -1,8 +1,8 @@
-/*	$NetBSD: error.h,v 1.15 2002/11/24 22:35:39 christos Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -66,7 +62,6 @@ struct jmploc {
 
 extern struct jmploc *handler;
 extern int exception;
-extern int exerrno;	/* error for EXEXEC */
 
 /* exceptions */
 #define EXINT 0		/* SIGINT received */
@@ -96,7 +91,7 @@ extern int exsig;
 		0; \
 	})
 #ifdef REALLY_SMALL
-void __inton __P((void));
+void __inton(void);
 #define INTON __inton()
 #else
 #define INTON \
@@ -138,7 +133,7 @@ void onint(void) __attribute__((__noreturn__));
 #else
 void onint(void);
 #endif
-void error(const char *, ...) __attribute__((__noreturn__));
+void sh_error(const char *, ...) __attribute__((__noreturn__));
 void exerror(int, const char *, ...) __attribute__((__noreturn__));
 const char *errmsg(int, int);
 

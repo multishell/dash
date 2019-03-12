@@ -1,8 +1,8 @@
-/*	$NetBSD: options.c,v 1.33 2003/01/22 20:36:04 dsl Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,15 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)options.c	8.2 (Berkeley) 5/4/95";
-#else
-__RCSID("$NetBSD: options.c,v 1.33 2003/01/22 20:36:04 dsl Exp $");
-#endif
-#endif /* not lint */
 
 #include <signal.h>
 #include <unistd.h>
@@ -92,7 +79,6 @@ static const char *const optnames[NOPTS] = {
 	"allexport",
 	"notify",
 	"nounset",
-	"quietprofile",
 	"nolog",
 	"debug",
 };
@@ -113,7 +99,6 @@ const char optletters[NOPTS] = {
 	'a',
 	'b',
 	'u',
-	'q',
 	0,
 	0,
 };
@@ -150,7 +135,7 @@ procargs(int argc, char **argv)
 	xminusc = minusc;
 	if (*xargv == NULL) {
 		if (xminusc)
-			error("-c requires an argument");
+			sh_error("-c requires an argument");
 		sflag = 1;
 	}
 	if (iflag == 2 && sflag == 1 && isatty(0) && isatty(1))
@@ -265,7 +250,7 @@ minus_o(char *name, int val)
 				optlist[i] = val;
 				return;
 			}
-		error("Illegal option -o %s", name);
+		sh_error("Illegal option -o %s", name);
 	}
 }
 
@@ -287,7 +272,7 @@ setoption(int flag, int val)
 			}
 			return;
 		}
-	error("Illegal option -%c", flag);
+	sh_error("Illegal option -%c", flag);
 	/* NOTREACHED */
 }
 
@@ -351,7 +336,7 @@ shiftcmd(int argc, char **argv)
 	if (argc > 1)
 		n = number(argv[1]);
 	if (n > shellparam.nparam)
-		error("can't shift that many");
+		sh_error("can't shift that many");
 	INTOFF;
 	shellparam.nparam -= n;
 	for (ap1 = shellparam.p ; --n >= 0 ; ap1++) {
@@ -409,7 +394,7 @@ getoptscmd(int argc, char **argv)
 	char **optbase;
 
 	if (argc < 3)
-		error("Usage: getopts optstring var [arg]");
+		sh_error("Usage: getopts optstring var [arg]");
 	else if (argc == 3) {
 		optbase = shellparam.p;
 		if (shellparam.optind > shellparam.nparam + 1) {
@@ -547,13 +532,13 @@ nextopt(const char *optstring)
 	c = *p++;
 	for (q = optstring ; *q != c ; ) {
 		if (*q == '\0')
-			error("Illegal option -%c", c);
+			sh_error("Illegal option -%c", c);
 		if (*++q == ':')
 			q++;
 	}
 	if (*++q == ':') {
 		if (*p == '\0' && (p = *argptr++) == NULL)
-			error("No arg for -%c option", c);
+			sh_error("No arg for -%c option", c);
 		optionarg = p;
 		p = NULL;
 	}

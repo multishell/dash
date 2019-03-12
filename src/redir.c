@@ -1,8 +1,8 @@
-/*	$NetBSD: redir.c,v 1.27 2002/11/24 22:35:42 christos Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,15 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)redir.c	8.2 (Berkeley) 5/4/95";
-#else
-__RCSID("$NetBSD: redir.c,v 1.27 2002/11/24 22:35:42 christos Exp $");
-#endif
-#endif /* not lint */
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -157,7 +144,7 @@ redirect(union node *redir, int flags)
 				if (i != EBADF) {
 					const char *m = strerror(i);
 					close(newfd);
-					error("%d: %s", fd, m);
+					sh_error("%d: %s", fd, m);
 					/* NOTREACHED */
 				}
 			} else {
@@ -238,9 +225,9 @@ openredirect(union node *redir)
 
 	return f;
 ecreate:
-	error("cannot create %s: %s", fname, errmsg(errno, E_CREAT));
+	sh_error("cannot create %s: %s", fname, errmsg(errno, E_CREAT));
 eopen:
-	error("cannot open %s: %s", fname, errmsg(errno, E_OPEN));
+	sh_error("cannot open %s: %s", fname, errmsg(errno, E_OPEN));
 }
 
 
@@ -294,7 +281,7 @@ openhere(union node *redir)
 	size_t len = 0;
 
 	if (pipe(pip) < 0)
-		error("Pipe call failed");
+		sh_error("Pipe call failed");
 	if (redir->type == NHERE) {
 		len = strlen(redir->nhere.doc->narg.text);
 		if (len <= PIPESIZE) {
@@ -401,7 +388,7 @@ copyfd(int from, int to)
 		if (errno2 == EMFILE)
 			return EMPTY;
 		else
-			error("%d: %s", from, strerror(errno2));
+			sh_error("%d: %s", from, strerror(errno2));
 	}
 	return newfd;
 }

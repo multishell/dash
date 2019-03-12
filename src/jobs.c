@@ -1,8 +1,8 @@
-/*	$NetBSD: jobs.c,v 1.56 2002/11/25 12:13:03 agc Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,15 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)jobs.c	8.5 (Berkeley) 5/4/95";
-#else
-__RCSID("$NetBSD: jobs.c,v 1.56 2002/11/25 12:13:03 agc Exp $");
-#endif
-#endif /* not lint */
 
 #include <fcntl.h>
 #include <signal.h>
@@ -78,6 +65,7 @@ __RCSID("$NetBSD: jobs.c,v 1.56 2002/11/25 12:13:03 agc Exp $");
 #include "memalloc.h"
 #include "error.h"
 #include "mystring.h"
+#include "system.h"
 
 /* mode flags for set_curjob */
 #define CUR_DELETE 2
@@ -94,19 +82,21 @@ static struct job *jobtab;
 static unsigned njobs;
 /* pid of last background process */
 pid_t backgndpid;
+
 #if JOBS
 /* pgrp of shell on invocation */
 static int initialpgrp;
+/* control terminal */
+static int ttyfd = -1;
 #endif
+
 /* current job */
 static struct job *curjob;
-static int ttyfd = -1;
 /* number of presumed living untracked jobs */
 static int jobless;
 
 STATIC void set_curjob(struct job *, unsigned);
 STATIC int jobno(const struct job *);
-STATIC int restartjob(struct job *, int);
 STATIC int sprint_status(char *, int, int);
 STATIC void freejob(struct job *);
 STATIC struct job *getjob(const char *, int);
@@ -123,8 +113,12 @@ STATIC void cmdtxt(union node *);
 STATIC void cmdlist(union node *, int);
 STATIC void cmdputs(const char *);
 STATIC void showpipe(struct job *, struct output *);
-STATIC void xtcsetpgrp(int, pid_t);
 STATIC int getstatus(struct job *);
+
+#if JOBS
+static int restartjob(struct job *, int);
+static void xtcsetpgrp(int, pid_t);
+#endif
 
 STATIC void
 set_curjob(struct job *jp, unsigned mode)
@@ -162,7 +156,7 @@ set_curjob(struct job *jp, unsigned mode)
 			jpp = &jp1->prev_job;
 		} while (1);
 		/* FALLTHROUGH */
-#ifdef JOBS
+#if JOBS
 	case CUR_STOPPED:
 #endif
 		/* newly stopped job - becomes curjob */
@@ -258,7 +252,7 @@ killcmd(argc, argv)
 
 	if (argc <= 1) {
 usage:
-		error(
+		sh_error(
 "Usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or\n"
 "kill -l [exitstatus]"
 		);
@@ -281,7 +275,7 @@ usage:
 				case 's':
 					signo = decode_signal(optionarg, 1);
 					if (signo < 0) {
-						error(
+						sh_error(
 							"invalid signal number or name: %s",
 							optionarg
 						);
@@ -317,8 +311,8 @@ usage:
 		if (0 < signo && signo < NSIG)
 			outfmt(out, snlfmt, signal_names[signo]);
 		else
-			error("invalid signal number or exit status: %s",
-			      *argv);
+			sh_error("invalid signal number or exit status: %s",
+				 *argv);
 		return 0;
 	}
 
@@ -345,7 +339,7 @@ jobno(const struct job *jp)
 	return jp - jobtab + 1;
 }
 
-#ifdef JOBS
+#if JOBS
 int
 fgcmd(int argc, char **argv)
 {
@@ -727,7 +721,7 @@ gotit:
 #endif
 	return jp;
 err:
-	error(err_msg, name);
+	sh_error(err_msg, name);
 }
 
 
@@ -838,19 +832,20 @@ growjobtab(void)
 STATIC inline void
 forkchild(struct job *jp, union node *n, int mode)
 {
-	int wasroot;
-	pid_t pgrp;
+	int oldlvl;
 
 	TRACE(("Child shell %d\n", getpid()));
-	wasroot = rootshell;
-	rootshell = 0;
+	oldlvl = shlvl;
+	shlvl++;
 
 	closescript();
 	clear_traps();
 #if JOBS
 	/* do job control only in root shell */
 	jobctl = 0;
-	if (mode != FORK_NOJOB && jp->jobctl && wasroot) {
+	if (mode != FORK_NOJOB && jp->jobctl && !oldlvl) {
+		pid_t pgrp;
+
 		if (jp->nprocs == 0)
 			pgrp = getpid();
 		else
@@ -869,10 +864,10 @@ forkchild(struct job *jp, union node *n, int mode)
 		if (jp->nprocs == 0) {
 			close(0);
 			if (open(_PATH_DEVNULL, O_RDONLY) != 0)
-				error("Can't open %s", _PATH_DEVNULL);
+				sh_error("Can't open %s", _PATH_DEVNULL);
 		}
 	}
-	if (wasroot && iflag) {
+	if (!oldlvl && iflag) {
 		setsignal(SIGINT);
 		setsignal(SIGQUIT);
 		setsignal(SIGTERM);
@@ -928,7 +923,7 @@ forkshell(struct job *jp, union node *n, int mode)
 		TRACE(("Fork failed, errno=%d", errno));
 		if (jp)
 			freejob(jp);
-		error("Cannot fork");
+		sh_error("Cannot fork");
 	}
 	if (pid == 0)
 		forkchild(jp, n, mode);
@@ -1026,7 +1021,7 @@ dowait(int block, struct job *job)
 			}
 			if (sp->status == -1)
 				state = JOBRUNNING;
-#ifdef JOBS
+#if JOBS
 			if (state == JOBRUNNING)
 				continue;
 			if (WIFSTOPPED(sp->status)) {
@@ -1049,7 +1044,7 @@ gotjob:
 		if (thisjob->state != state) {
 			TRACE(("Job %d: changing state from %d to %d\n", jobno(thisjob), thisjob->state, state));
 			thisjob->state = state;
-#ifdef JOBS
+#if JOBS
 			if (state == JOBSTOPPED) {
 				set_curjob(thisjob, CUR_STOPPED);
 			}
@@ -1466,12 +1461,14 @@ showpipe(struct job *jp, struct output *out)
 }
 
 
+#if JOBS
 STATIC void
 xtcsetpgrp(int fd, pid_t pgrp)
 {
 	if (tcsetpgrp(fd, pgrp))
-		error("Cannot set tty process group (%s)", strerror(errno));
+		sh_error("Cannot set tty process group (%s)", strerror(errno));
 }
+#endif
 
 
 STATIC int

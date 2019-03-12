@@ -1,8 +1,8 @@
-/*	$NetBSD: expand.c,v 1.56 2002/11/24 22:35:39 christos Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,21 +32,14 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)expand.c	8.5 (Berkeley) 5/15/95";
-#else
-__RCSID("$NetBSD: expand.c,v 1.56 2002/11/24 22:35:39 christos Exp $");
-#endif
-#endif /* not lint */
-
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
+#ifdef HAVE_GETPWNAM
 #include <pwd.h>
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <limits.h>
@@ -81,12 +70,12 @@ __RCSID("$NetBSD: expand.c,v 1.56 2002/11/24 22:35:39 christos Exp $");
 #include "jobs.h"
 #include "options.h"
 #include "var.h"
-#include "input.h"
 #include "output.h"
 #include "memalloc.h"
 #include "error.h"
 #include "mystring.h"
 #include "show.h"
+#include "system.h"
 
 /*
  * _rmescape() flags
@@ -131,7 +120,7 @@ STATIC void expbackq(union node *, int, int);
 STATIC const char *subevalvar(char *, char *, int, int, int, int, int);
 STATIC char *evalvar(char *, int);
 STATIC size_t strtodest(const char *, const char *, int);
-STATIC void memtodest(const unsigned char *, size_t, const char *, int);
+STATIC void memtodest(const char *, size_t, const char *, int);
 STATIC ssize_t varvalue(char *, int, int);
 STATIC void recordregion(int, int, int);
 STATIC void removerecordregions(int); 
@@ -186,6 +175,17 @@ esclen(const char *start, const char *p) {
 		esc++;
 	}
 	return esc;
+}
+
+
+static inline const char *getpwhome(const char *name)
+{
+#ifdef HAVE_GETPWNAM
+	struct passwd *pw = getpwnam(name);
+	return pw ? pw->pw_dir : 0;
+#else
+	return 0;
+#endif
 }
 
 
@@ -396,7 +396,6 @@ exptilde(char *startp, char *p, int flag)
 {
 	char c;
 	char *name;
-	struct passwd *pw;
 	const char *home;
 	int quotes = flag & QUOTES_ESC;
 	int startloc;
@@ -421,14 +420,11 @@ exptilde(char *startp, char *p, int flag)
 done:
 	*p = '\0';
 	if (*name == '\0') {
-		if ((home = lookupvar(homestr)) == NULL)
-			goto lose;
+		home = lookupvar(homestr);
 	} else {
-		if ((pw = getpwnam(name)) == NULL)
-			goto lose;
-		home = pw->pw_dir;
+		home = getpwhome(name);
 	}
-	if (*home == '\0')
+	if (!home || !*home)
 		goto lose;
 	*p = c;
 	startloc = expdest - (char *)stackblock();
@@ -511,7 +507,7 @@ expari(int quotes)
 			p--;
 #ifdef DEBUG
 			if (p < start) {
-				error("missing CTLARI (shouldn't happen)");
+				sh_error("missing CTLARI (shouldn't happen)");
 			}
 #endif
 		}
@@ -887,7 +883,7 @@ end:
  */
 
 STATIC void
-memtodest(const unsigned char *p, size_t len, const char *syntax, int quotes) {
+memtodest(const char *p, size_t len, const char *syntax, int quotes) {
 	char *q;
 
 	if (unlikely(!len))
@@ -896,7 +892,7 @@ memtodest(const unsigned char *p, size_t len, const char *syntax, int quotes) {
 	q = makestrspace(len * 2, expdest);
 
 	do {
-		int c = *p++;
+		int c = (unsigned char)*p++;
 		if (c) {
 			if ((quotes & QUOTES_ESC) &&
 			    (syntax[c] == CCTL || syntax[c] == CBACK))
@@ -1204,7 +1200,7 @@ nometa:
 			exparg.lastp = &str->next;
 			break;
 		default:	/* GLOB_NOSPACE */
-			error("Out of space");
+			sh_error("Out of space");
 		}
 		str = str->next;
 	}
@@ -1655,12 +1651,7 @@ _rmescapes(char *str, int flag)
 		}
 		q = r;
 		if (len > 0) {
-#ifdef _GNU_SOURCE
 			q = mempcpy(q, str, len);
-#else
-			memcpy(q, str, len);
-			q += len;
-#endif
 		}
 	}
 	inquotes = (flag & RMESCAPE_QUOTED) ^ RMESCAPE_QUOTED;
@@ -1749,5 +1740,5 @@ varunset(const char *end, const char *var, const char *umsg, int varflags)
 		} else
 			msg = umsg;
 	}
-	error("%.*s: %s%s", end - var - 1, var, msg, tail);
+	sh_error("%.*s: %s%s", end - var - 1, var, msg, tail);
 }

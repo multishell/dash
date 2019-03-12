@@ -1,8 +1,8 @@
-/*	$NetBSD: histedit.c,v 1.27 2002/11/24 22:35:40 christos Exp $	*/
-
 /*-
  * Copyright (c) 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,15 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)histedit.c	8.2 (Berkeley) 5/4/95";
-#else
-__RCSID("$NetBSD: histedit.c,v 1.27 2002/11/24 22:35:40 christos Exp $");
-#endif
-#endif /* not lint */
 
 #include <sys/param.h>
 #include <paths.h>
@@ -220,10 +207,10 @@ histcmd(int argc, char **argv)
 #endif
 
 	if (hist == NULL)
-		error("history not active");
+		sh_error("history not active");
 
 	if (argc == 1)
-		error("missing history argument");
+		sh_error("missing history argument");
 
 #ifdef __GLIBC__
 	optind = 0;
@@ -249,11 +236,11 @@ histcmd(int argc, char **argv)
 			sflg = 1;
 			break;
 		case ':':
-			error("option -%c expects argument", optopt);
+			sh_error("option -%c expects argument", optopt);
 			/* NOTREACHED */
 		case '?':
 		default:
-			error("unknown option: -%c", optopt);
+			sh_error("unknown option: -%c", optopt);
 			/* NOTREACHED */
 		}
 	argc -= optind, argv += optind;
@@ -280,7 +267,7 @@ histcmd(int argc, char **argv)
 		if (++active > MAXHISTLOOPS) {
 			active = 0;
 			displayhist = 0;
-			error("called recursively too many times");
+			sh_error("called recursively too many times");
 		}
 		/*
 		 * Set editor.
@@ -323,7 +310,7 @@ histcmd(int argc, char **argv)
 		laststr = argv[1];
 		break;
 	default:
-		error("too many args");
+		sh_error("too many args");
 		/* NOTREACHED */
 	}
 	/*
@@ -352,10 +339,10 @@ histcmd(int argc, char **argv)
 		INTOFF;		/* easier */
 		sprintf(editfile, "%s_shXXXXXX", _PATH_TMP);
 		if ((fd = mkstemp(editfile)) < 0)
-			error("can't create temporary file %s", editfile);
+			sh_error("can't create temporary file %s", editfile);
 		if ((efp = fdopen(fd, "w")) == NULL) {
 			close(fd);
-			error("can't allocate stdio buffer for temp");
+			sh_error("can't allocate stdio buffer for temp");
 		}
 	}
 
@@ -383,7 +370,8 @@ histcmd(int argc, char **argv)
 					out2str(s);
 				}
 
-				evalstring(strcpy(stalloc(strlen(s) + 1), s));
+				evalstring(strcpy(stalloc(strlen(s) + 1), s),
+					   ~0);
 				if (displayhist && hist) {
 					/*
 					 *  XXX what about recursive and
@@ -407,7 +395,8 @@ histcmd(int argc, char **argv)
 		fclose(efp);
 		editcmd = stalloc(strlen(editor) + strlen(editfile) + 2);
 		sprintf(editcmd, "%s %s", editor, editfile);
-		evalstring(editcmd, 0);	/* XXX - should use no JC command */
+		/* XXX - should use no JC command */
+		evalstring(editcmd, ~0);
 		INTON;
 		readcmdfile(editfile);	/* XXX - should read back - quick tst */
 		unlink(editfile);
@@ -488,23 +477,16 @@ str_to_event(const char *str, int last)
 			}
 		}
 		if (retval == -1)
-			error("history number %s not found (internal error)",
-			       str);
+			sh_error("history number %s not found (internal error)",
+				 str);
 	} else {
 		/*
 		 * pattern
 		 */
 		retval = history(hist, &he, H_PREV_STR, str);
 		if (retval == -1)
-			error("history pattern not found: %s", str);
+			sh_error("history pattern not found: %s", str);
 	}
 	return (he.num);
-}
-#else
-int
-histcmd(int argc, char **argv)
-{
-	error("not compiled with history support");
-	/* NOTREACHED */
 }
 #endif

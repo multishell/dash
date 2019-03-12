@@ -1,8 +1,8 @@
-/*	$NetBSD: trap.c,v 1.28 2002/11/24 22:35:43 christos Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,15 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)trap.c	8.5 (Berkeley) 6/5/95";
-#else
-__RCSID("$NetBSD: trap.c,v 1.28 2002/11/24 22:35:43 christos Exp $");
-#endif
-#endif /* not lint */
 
 #include <signal.h>
 #include <unistd.h>
@@ -132,7 +119,7 @@ trapcmd(int argc, char **argv)
 		action = *ap++;
 	while (*ap) {
 		if ((signo = decode_signal(*ap, 0)) < 0)
-			error("%s: bad trap", *ap);
+			sh_error("%s: bad trap", *ap);
 		INTOFF;
 		if (action) {
 			if (action[0] == '-' && action[1] == '\0')
@@ -301,23 +288,34 @@ onsig(int signo)
  * handlers while we are executing a trap handler.
  */
 
-void
+int
 dotrap(void)
 {
 	char *p;
 	char *q;
+	int i;
 	int savestatus;
+	int skip = 0;
 
 	savestatus = exitstatus;
-	q = gotsig;
-	while (pendingsigs = 0, barrier(), (p = memchr(q, 1, NSIG - 1))) {
-		*p = 0;
-		p = trap[p - q + 1];
+	pendingsigs = 0;
+	barrier();
+
+	for (i = 0, q = gotsig; i < NSIG - 1; i++, q++) {
+		if (!*q)
+			continue;
+		*q = 0;
+
+		p = trap[i + 1];
 		if (!p)
 			continue;
-		evalstring(p);
+		skip = evalstring(p, SKIPEVAL);
 		exitstatus = savestatus;
+		if (skip)
+			break;
 	}
+
+	return skip;
 }
 
 
@@ -352,20 +350,21 @@ exitshell(void)
 	struct jmploc loc;
 	char *p;
 	int status;
-	int jmp;
 
 #ifdef HETIO
 	hetio_reset_term();
 #endif
-	jmp = setjmp(loc.loc);
 	status = exitstatus;
 	TRACE(("pid %d, exitshell(%d)\n", getpid(), status));
-	if (jmp)
+	if (setjmp(loc.loc)) {
+		if (exception == EXEXIT)
+			_exit(exitstatus);
 		goto out;
+	}
 	handler = &loc;
-	if ((p = trap[0]) != NULL && *p != '\0') {
+	if ((p = trap[0])) {
 		trap[0] = NULL;
-		evalstring(p);
+		evalstring(p, 0);
 	}
 	flushall();
 out:

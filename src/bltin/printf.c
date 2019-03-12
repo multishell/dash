@@ -1,8 +1,8 @@
-/*	$NetBSD: printf.c,v 1.25 2002/11/24 22:35:45 christos Exp $	*/
-
 /*
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,39 +29,18 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-#ifndef lint
-#if !defined(BUILTIN) && !defined(SHELL)
-__COPYRIGHT("@(#) Copyright (c) 1989, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n");
-#endif
-#endif
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)printf.c	8.2 (Berkeley) 3/22/95";
-#else
-__RCSID("$NetBSD: printf.c,v 1.25 2002/11/24 22:35:45 christos Exp $");
-#endif
-#endif /* not lint */
-
 #include <sys/types.h>
 
 #include <ctype.h>
-#include <err.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
-#include <locale.h>
 #include <stdarg.h>
-#ifndef SHELL
-#include <stdio.h>
-#endif
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-static char	*conv_escape_str(char *);
+static int	 conv_escape_str(char *);
 static char	*conv_escape(char *, int *);
 static int	 getchr(void);
 static double	 getdouble(void);
@@ -78,19 +53,10 @@ static void      check_conversion(const char *, const char *);
 static int	rval;
 static char  **gargv;
 
-#ifdef BUILTIN		/* csh builtin */
-#define main progprintf
-#endif
-
 #define isodigit(c)	((c) >= '0' && (c) <= '7')
 #define octtobin(c)	((c) - '0')
 
-#ifdef SHELL		/* sh (aka ash) builtin */
-#define main printfcmd
 #include "bltin.h"
-#else
-#define nullstr ""
-#endif /* SHELL */
 #include "system.h"
 
 #define PF(f, func) { \
@@ -107,8 +73,7 @@ static char  **gargv;
 	} \
 }
 
-int main(int, char **);
-int main(int argc, char *argv[])
+int printfcmd(int argc, char *argv[])
 {
 	char *fmt;
 	char *format;
@@ -116,13 +81,7 @@ int main(int argc, char *argv[])
 
 	rval = 0;
 
-#if !defined(SHELL) && !defined(BUILTIN)
-	(void)setlocale (LC_ALL, "");
-#endif
-
-#ifdef SHELL
 	nextopt(nullstr);
-#endif
 
 	argv = argptr;
 	format = *argv;
@@ -196,11 +155,12 @@ pc:
 			switch (ch) {
 
 			case 'b': {
-				char *p = conv_escape_str(getstr());
+				int done = conv_escape_str(getstr());
+				char *p = stackblock();
 				*fmt = 's';
 				PF(start, p);
 				/* escape if a \c was encountered */
-				if (rval & 0x100)
+				if (done)
 					goto out;
 				*fmt = 'b';
 				break;
@@ -249,12 +209,7 @@ pc:
 	} while (gargv != argv && *gargv);
 
 out:
-#ifdef SHELL
-	return (rval & ~0x100);
-#else
-	fflush(stdout);
-	return (rval & ~0x100 ?: ferror(stdout));
-#endif
+	return rval;
 err:
 	return 1;
 }
@@ -264,26 +219,14 @@ err:
  * Print SysV echo(1) style escape string 
  *	Halts processing string if a \c escape is encountered.
  */
-static char *
+static int
 conv_escape_str(char *str)
 {
 	int ch;
-#ifndef SHELL
-	static char *conv_str;
-#endif
 	char *cp;
 
 	/* convert string into a temporary buffer... */
-#ifdef SHELL
 	STARTSTACKSTR(cp);
-#else
-	if (conv_str)
-		free(conv_str);
-	conv_str = malloc(strlen(str) + 4);
-	if (!conv_str)
-		return "<no memory>";
-	cp = conv_str;
-#endif
 
 	do {
 		int c;
@@ -295,8 +238,7 @@ conv_escape_str(char *str)
 		ch = *str++;
 		if (ch == 'c') {
 			/* \c as in SYSV echo - abort all processing.... */
-			rval |= 0x100;
-			ch = 0;
+			ch = 0x100;
 			continue;
 		}
 
@@ -323,15 +265,9 @@ conv_escape_str(char *str)
 		/* Finally test for sequences valid in the format string */
 		str = conv_escape(str - 1, &c);
 		ch = c;
-#ifdef SHELL
-	} while (STPUTC(ch, cp), ch);
+	} while (STPUTC(ch, cp), (char)ch);
 
-	return stackblock();
-#else
-	} while ((*cp++ = ch));
-
-	return conv_str;
-#endif
+	return ch;
 }
 
 /*
@@ -380,23 +316,12 @@ out:
 static char *
 mklong(const char *str, const char *ch)
 {
-#ifdef SHELL
 	char *copy;
-#else
-	static char copy[64];
-#endif
 	size_t len;	
 
 	len = ch - str + 3;
-#ifdef SHELL
 	STARTSTACKSTR(copy);
 	copy = makestrspace(len, copy);
-#else
-	if (len > sizeof copy) {
-		warnx("format %s too complex\n", str);
-		len = 4;
-	}
-#endif
 	memcpy(copy, str, len - 3);
 	copy[len - 3] = 'j';
 	copy[len - 2] = *ch;
@@ -503,7 +428,6 @@ check_conversion(const char *s, const char *ep)
 	}
 }
 
-#ifdef SHELL
 int
 echocmd(int argc, char **argv)
 {
@@ -521,16 +445,11 @@ echocmd(int argc, char **argv)
 	do {
 		char c;
 
-		c = *(*argv)++;
-		if (!c)
-			goto next;
-		if (c != '\\')
-			goto print;
-
-		outstr(conv_escape_str(*argv - 1), outs);
-		if (rval & 0x100)
+		nonl += conv_escape_str(*argv);
+		outstr(stackblock(), outs);
+		if (nonl > 0)
 			break;
-next:
+
 		c = ' ';
 		if (!*++argv) {
 end:
@@ -539,9 +458,7 @@ end:
 			}
 			c = '\n';
 		}
-print:
 		outc(c, outs);
 	} while (*argv);
 	return 0;
 }
-#endif

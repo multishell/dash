@@ -1,13 +1,19 @@
-# $Id$
-
-AM_CPPFLAGS = -include $(top_builddir)/config.h
 AM_YFLAGS = -d
 
-CFLAGS = -g -O2 -Wall
-DEFS = \
+COMMON_CFLAGS = -Wall
+COMMON_CPPFLAGS = \
+	-include $(top_builddir)/config.h \
 	-DBSD=1 -DSMALL -DSHELL \
-	-DGLOB_BROKEN -DFNMATCH_BROKEN -DIFS_BROKEN \
-	-D__COPYRIGHT\(x\)= -D__RCSID\(x\)= -D_DIAGASSERT\(x\)=
+	-DGLOB_BROKEN -DFNMATCH_BROKEN -DIFS_BROKEN
+
+AM_CFLAGS = $(COMMON_CFLAGS)
+AM_CPPFLAGS = $(COMMON_CPPFLAGS)
+AM_CFLAGS_FOR_BUILD = -g -O2 $(COMMON_CFLAGS) 
+AM_CPPFLAGS_FOR_BUILD = $(COMMON_CPPFLAGS)
+
+COMPILE_FOR_BUILD = \
+	$(CC_FOR_BUILD) $(AM_CPPFLAGS_FOR_BUILD) $(CPPFLAGS_FOR_BUILD) \
+	$(AM_CFLAGS_FOR_BUILD) $(CFLAGS_FOR_BUILD) 
 
 bin_PROGRAMS = dash
 
@@ -24,22 +30,27 @@ dash_SOURCES = \
 	show.h system.h trap.h var.h
 dash_LDADD = builtins.o init.o nodes.o signames.o syntax.o
 
+HELPERS = mkinit mksyntax mknodes mksignames
+
 BUILT_SOURCES = arith.h builtins.h nodes.h syntax.h token.h
 CLEANFILES = \
 	$(BUILT_SOURCES) $(patsubst %.o,%.c,$(dash_LDADD)) \
-	arith.c mkinit mknodes mksignames mksyntax
+	arith.c $(HELPERS) builtins.def
 
 man_MANS = dash.1
 EXTRA_DIST = \
 	$(man_MANS) \
-	mktokens mkbuiltins builtins.def mkinit.c \
+	mktokens mkbuiltins builtins.def.in mkinit.c \
 	mknodes.c nodetypes nodes.c.pat mksyntax.c mksignames.c
 
 token.h: mktokens
 	sh $^
 
-builtins.c builtins.h: mkbuiltins shell.h builtins.def
-	sh $^ . '$(CFLAGS)'
+builtins.def: builtins.def.in $(top_builddir)/config.h
+	$(COMPILE) -E -x c -o $@ $<
+
+builtins.c builtins.h: mkbuiltins builtins.def
+	sh $^
 
 init.c: mkinit $(dash_CFILES)
 	./$^
@@ -52,3 +63,6 @@ syntax.c syntax.h: mksyntax
 
 signames.c: mksignames
 	./$^
+
+$(HELPERS): %: %.c
+	$(COMPILE_FOR_BUILD) -o $@ $<

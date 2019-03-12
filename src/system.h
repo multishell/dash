@@ -26,7 +26,13 @@
  * SUCH DAMAGE.
  */
 
+#include <limits.h>
 #include <signal.h>
+#include <sys/types.h>
+
+#ifndef SSIZE_MAX
+#define SSIZE_MAX ((ssize_t)((size_t)-1 >> 1))
+#endif
 
 static inline void sigclearmask(void)
 {
@@ -51,10 +57,43 @@ char *stpcpy(char *, const char *);
 char *strchrnul(const char *, int);
 #endif
 
+#ifndef HAVE_STRSIGNAL
+char *strsignal(int);
+#endif
+
+#ifndef HAVE_STRTOD
+static inline double strtod(const char *nptr, char **endptr)
+{
+	*endptr = (char *)nptr;
+	return 0;
+}
+#endif
+
 #ifndef HAVE_STRTOIMAX
 #define strtoimax strtoll
 #endif
 
 #ifndef HAVE_STRTOUMAX
 #define strtoumax strtoull
+#endif
+
+#ifndef HAVE_BSEARCH
+void *bsearch(const void *, const void *, size_t, size_t,
+	      int (*)(const void *, const void *));
+#endif
+
+#ifndef HAVE_KILLPG
+static inline int killpg(pid_t pid, int signal)
+{
+#ifdef DEBUG
+	if (pid < 0)
+		abort();
+#endif
+	return kill(-pid, signal);
+}
+#endif
+
+#ifndef HAVE_SYSCONF
+#define _SC_CLK_TCK 2
+long sysconf(int) __attribute__((__noreturn__));
 #endif

@@ -1,7 +1,6 @@
 /*
- * Copyright (c) 1999 Herbert Xu <herbert@debian.org>
+ * Copyright (c) 1999 Herbert Xu <herbert@gondor.apana.org.au>
  * This file contains code for the times builtin.
- * $Id$
  */
 
 #include <sys/times.h>
@@ -11,10 +10,9 @@
 #else
 #include "bltin.h"
 #endif
+#include "system.h"
 
-#define main timescmd
-
-int main() {
+int timescmd() {
 	struct tms buf;
 	long int clk_tck = sysconf(_SC_CLK_TCK);
 

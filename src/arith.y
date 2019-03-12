@@ -1,9 +1,9 @@
 %{
-/*	$NetBSD: arith.y,v 1.15 2002/11/24 22:35:39 christos Exp $	*/
-
 /*-
  * Copyright (c) 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,15 +33,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)arith.y	8.3 (Berkeley) 5/4/95";
-#else
-__RCSID("$NetBSD: arith.y,v 1.15 2002/11/24 22:35:39 christos Exp $");
-#endif
-#endif /* not lint */
-
 #include <stdlib.h>
 #include "expand.h"
 #include "shell.h"
@@ -61,7 +48,7 @@ int yyparse(void);
 void yyerror(const char *);
 #ifdef TESTARITH
 int main(int , char *[]);
-int error(char *);
+int sh_error(char *);
 #endif
 
 %}
@@ -137,46 +124,6 @@ arith(s)
 }
 
 
-/*
- *  The exp(1) builtin.
- */
-int
-expcmd(argc, argv)
-	int argc;
-	char **argv;
-{
-	const char *p;
-	char *concat;
-	char **ap;
-	long i;
-
-	if (argc > 1) {
-		p = argv[1];
-		if (argc > 2) {
-			/*
-			 * concatenate arguments
-			 */
-			STARTSTACKSTR(concat);
-			ap = argv + 2;
-			for (;;) {
-				while (*p)
-					STPUTC(*p++, concat);
-				if ((p = *ap++) == NULL)
-					break;
-				STPUTC(' ', concat);
-			}
-			STPUTC('\0', concat);
-			p = grabstackstr(concat);
-		}
-	} else
-		p = nullstr;
-
-	i = arith(p);
-
-	out1fmt("%ld\n", i);
-	return (! i);
-}
-
 /*************************/
 #ifdef TEST_ARITH
 #include <stdio.h>
@@ -185,7 +132,7 @@ main(argc, argv)
 {
 	printf("%d\n", exp(argv[1]));
 }
-error(s)
+sh_error(s)
 	char *s;
 {
 	fprintf(stderr, "exp: %s\n", s);
@@ -203,6 +150,6 @@ yyerror(s)
 #endif
 	yyclearin;
 	arith_lex_reset();	/* reprime lex */
-	error("arithmetic expression: %s: \"%s\"", s, arith_startbuf);
+	sh_error("arithmetic expression: %s: \"%s\"", s, arith_startbuf);
 	/* NOTREACHED */
 }

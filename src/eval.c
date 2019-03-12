@@ -1,8 +1,8 @@
-/*	$NetBSD: eval.c,v 1.71 2003/01/23 03:33:16 rafal Exp $	*/
-
 /*-
  * Copyright (c) 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,15 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)eval.c	8.9 (Berkeley) 6/8/95";
-#else
-__RCSID("$NetBSD: eval.c,v 1.71 2003/01/23 03:33:16 rafal Exp $");
-#endif
-#endif /* not lint */
 
 #include <stdlib.h>
 #include <signal.h>
@@ -86,7 +73,7 @@ __RCSID("$NetBSD: eval.c,v 1.71 2003/01/23 03:33:16 rafal Exp $");
 int evalskip;			/* set if we are skipping commands */
 STATIC int skipcount;		/* number of levels to skip */
 MKINIT int loopnest;		/* current loop nesting level */
-int funcnest;			/* depth of function calls */
+static int funcnest;		/* depth of function calls */
 
 
 char *commandname;
@@ -133,7 +120,6 @@ INCLUDE "eval.h"
 RESET {
 	evalskip = 0;
 	loopnest = 0;
-	funcnest = 0;
 }
 #endif
 
@@ -164,7 +150,8 @@ evalcmd(int argc, char **argv)
                         STPUTC('\0', concat);
                         p = grabstackstr(concat);
                 }
-                evalstring(p);
+                evalstring(p, ~SKIPEVAL);
+                
         }
         return exitstatus;
 }
@@ -174,23 +161,29 @@ evalcmd(int argc, char **argv)
  * Execute a command or commands contained in a string.
  */
 
-void
-evalstring(char *s)
+int
+evalstring(char *s, int mask)
 {
 	union node *n;
 	struct stackmark smark;
+	int skip;
 
-	setstackmark(&smark);
 	setinputstring(s);
+	setstackmark(&smark);
 
+	skip = 0;
 	while ((n = parsecmd(0)) != NEOF) {
 		evaltree(n, 0);
 		popstackmark(&smark);
-		if (evalskip)
+		skip = evalskip;
+		if (skip)
 			break;
 	}
 	popfile();
-	popstackmark(&smark);
+
+	skip &= mask;
+	evalskip = skip;
+	return skip;
 }
 
 
@@ -320,10 +313,15 @@ setstatus:
 		break;
 	}
 out:
-	if (pendingsigs)
-		dotrap();
-	if (flags & EV_EXIT || checkexit & exitstatus)
+	if ((checkexit & exitstatus))
+		evalskip |= SKIPEVAL;
+	else if (pendingsigs && dotrap())
+		goto exexit;
+
+	if (flags & EV_EXIT) {
+exexit:
 		exraise(EXEXIT);
+	}
 }
 
 
@@ -538,7 +536,7 @@ evalpipe(union node *n, int flags)
 		if (lp->next) {
 			if (pipe(pip) < 0) {
 				close(prevfd);
-				error("Pipe call failed");
+				sh_error("Pipe call failed");
 			}
 		}
 		if (forkshell(jp, lp->n, n->npipe.backgnd) == 0) {
@@ -623,7 +621,7 @@ evalbackcmd(union node *n, struct backcmd *result)
 		struct job *jp;
 
 		if (pipe(pip) < 0)
-			error("Pipe call failed");
+			sh_error("Pipe call failed");
 		jp = makejob(n, 1);
 		if (forkshell(jp, n, FORK_NOJOB) == 0) {
 			FORCEINTON;
@@ -953,16 +951,16 @@ evalfun(struct funcnode *func, int argc, char **argv, int flags)
 	localvars = NULL;
 	shellparam.malloc = 0;
 	func->count++;
+	funcnest++;
 	INTON;
 	shellparam.nparam = argc - 1;
 	shellparam.p = argv + 1;
 	shellparam.optind = 1;
 	shellparam.optoff = -1;
-	funcnest++;
 	evaltree(&func->n, flags & EV_TESTED);
-	funcnest--;
 funcdone:
 	INTOFF;
+	funcnest--;
 	freefunc(func);
 	poplocalvars();
 	localvars = savelocalvars;
@@ -970,10 +968,7 @@ funcdone:
 	shellparam = saveparam;
 	handler = savehandler;
 	INTON;
-	if (evalskip == SKIPFUNC) {
-		evalskip = 0;
-		skipcount = 0;
-	}
+	evalskip &= ~SKIPFUNC;
 	return e;
 }
 
@@ -1035,7 +1030,7 @@ breakcmd(int argc, char **argv)
 	int n = argc > 1 ? number(argv[1]) : 1;
 
 	if (n <= 0)
-		error(illnum, argv[1]);
+		sh_error(illnum, argv[1]);
 	if (n > loopnest)
 		n = loopnest;
 	if (n > 0) {
@@ -1053,19 +1048,12 @@ breakcmd(int argc, char **argv)
 int
 returncmd(int argc, char **argv)
 {
-	int ret = argc > 1 ? number(argv[1]) : exitstatus;
-
-	if (funcnest) {
-		evalskip = SKIPFUNC;
-		skipcount = 1;
-		return ret;
-	}
-	else {
-		/* Do what ksh does; skip the rest of the file */
-		evalskip = SKIPFILE;
-		skipcount = 1;
-		return ret;
-	}
+	/*
+	 * If called outside a function, do what ksh does;
+	 * skip the rest of the file.
+	 */
+	evalskip = funcnest ? SKIPFUNC : SKIPFILE;
+	return argv[1] ? number(argv[1]) : exitstatus;
 }
 
 

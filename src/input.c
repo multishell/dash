@@ -1,8 +1,8 @@
-/*	$NetBSD: input.c,v 1.37 2002/11/24 22:35:40 christos Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,15 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)input.c	8.3 (Berkeley) 6/9/95";
-#else
-__RCSID("$NetBSD: input.c,v 1.37 2002/11/24 22:35:40 christos Exp $");
-#endif
-#endif /* not lint */
 
 #include <stdio.h>	/* defines BUFSIZ */
 #include <fcntl.h>
@@ -260,14 +247,14 @@ retry:
 int
 preadbuffer(void)
 {
-	char *p, *q;
+	char *q;
 	int more;
 #ifndef SMALL
 	int something;
 #endif
 	char savec;
 
-	while (parsefile->strpush) {
+	while (unlikely(parsefile->strpush)) {
 		if (
 			parsenleft == -1 && parsefile->strpush->ap &&
 			parsenextc[-1] != ' ' && parsenextc[-1] != '\t'
@@ -278,60 +265,64 @@ preadbuffer(void)
 		if (--parsenleft >= 0)
 			return (*parsenextc++);
 	}
-	if (parsenleft == EOF_NLEFT || parsefile->buf == NULL)
+	if (unlikely(parsenleft == EOF_NLEFT || parsefile->buf == NULL))
 		return PEOF;
 	flushout(&output);
 #ifdef FLUSHERR
 	flushout(&errout);
 #endif
 
+	more = parselleft;
+	if (more <= 0) {
 again:
-	if (parselleft <= 0) {
-		if ((parselleft = preadfd()) <= 0) {
+		if ((more = preadfd()) <= 0) {
 			parselleft = parsenleft = EOF_NLEFT;
 			return PEOF;
 		}
 	}
 
-	q = p = parsenextc;
+	q = parsenextc;
 
 	/* delete nul characters */
 #ifndef SMALL
 	something = 0;
 #endif
-	for (more = 1; more;) {
-		switch (*p) {
-		case '\0':
-			p++;	/* Skip nul */
-			goto check;
+	for (;;) {
+		int c;
+
+		more--;
+		c = *q;
+
+		if (!c)
+			memmove(q, q + 1, more);
+		else {
+			q++;
+
+			if (c == '\n') {
+				parsenleft = q - parsenextc - 1;
+				break;
+			}
 
 #ifndef SMALL
-		case '\t':
-		case ' ':
-			break;
-#endif
-
-		case '\n':
-			parsenleft = q - parsenextc;
-			more = 0; /* Stop processing here */
-			break;
-
-#ifndef SMALL
-		default:
-			something = 1;
-			break;
+			switch (c) {
+			default:
+				something = 1;
+				/* fall through */
+			case '\t':
+			case ' ':
+				break;
+			}
 #endif
 		}
 
-		*q++ = *p++;
-check:
-		if (--parselleft <= 0 && more) {
+		if (more <= 0) {
 			parsenleft = q - parsenextc - 1;
 			if (parsenleft < 0)
 				goto again;
-			more = 0;
+			break;
 		}
 	}
+	parselleft = more;
 
 	savec = *q;
 	*q = '\0';
@@ -433,24 +424,29 @@ popstring(void)
  * old input onto the stack first.
  */
 
-void
-setinputfile(const char *fname, int push)
+int
+setinputfile(const char *fname, int flags)
 {
 	int fd;
 	int fd2;
 
 	INTOFF;
-	if ((fd = open(fname, O_RDONLY)) < 0)
-		error("Can't open %s", fname);
+	if ((fd = open(fname, O_RDONLY)) < 0) {
+		if (flags & INPUT_NOFILE_OK)
+			goto out;
+		sh_error("Can't open %s", fname);
+	}
 	if (fd < 10) {
 		fd2 = copyfd(fd, 10);
 		close(fd);
 		if (fd2 < 0)
-			error("Out of file descriptors");
+			sh_error("Out of file descriptors");
 		fd = fd2;
 	}
-	setinputfd(fd, push);
+	setinputfd(fd, flags & INPUT_PUSH_FILE);
+out:
 	INTON;
+	return fd;
 }
 
 

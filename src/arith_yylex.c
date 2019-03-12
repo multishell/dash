@@ -1,5 +1,3 @@
-/*	$Id$	*/
-
 /*-
  * Copyright (c) 2002
  *	Herbert Xu.
@@ -57,7 +55,7 @@ yylex()
 			continue;
 		default:
 err:
-			error("arith: syntax error: \"%s\"", arith_startbuf);
+			sh_error("arith: syntax error: \"%s\"", arith_startbuf);
 			/* NOTREACHED */
 		case '0':
 		case '1':

@@ -1,8 +1,8 @@
-/*	$NetBSD: main.c,v 1.46 2002/12/11 19:12:18 christos Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,20 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
-#ifndef lint
-__COPYRIGHT("@(#) Copyright (c) 1991, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n");
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)main.c	8.7 (Berkeley) 7/19/95";
-#else
-__RCSID("$NetBSD: main.c,v 1.46 2002/12/11 19:12:18 christos Exp $");
-#endif
-#endif /* not lint */
 
 #include <stdio.h>
 #include <signal.h>
@@ -85,7 +67,7 @@ __RCSID("$NetBSD: main.c,v 1.46 2002/12/11 19:12:18 christos Exp $");
 #define PROFILE 0
 
 int rootpid;
-int rootshell;
+int shlvl;
 #ifdef __GLIBC__
 int *dash_errno;
 #endif
@@ -96,6 +78,7 @@ extern int etext();
 
 STATIC void read_profile(const char *);
 STATIC char *find_dot_file(char *);
+static int cmdloop(int);
 int main(int, char **);
 
 /*
@@ -122,29 +105,18 @@ main(int argc, char **argv)
 	monitor(4, etext, profile_buf, sizeof profile_buf, 50);
 #endif
 	state = 0;
-	if (setjmp(jmploc.loc)) {
-		int status;
+	if (unlikely(setjmp(jmploc.loc))) {
 		int e;
+		int s;
 
 		reset();
 
 		e = exception;
-		switch (exception) {
-		case EXEXEC:
-			status = exerrno;
-			break;
+		if (e == EXERROR)
+			exitstatus = 2;
 
-		case EXERROR:
-			status = 2;
-			break;
-
-		default:
-			status = exitstatus;
-			break;
-		}
-		exitstatus = status;
-
-		if (e == EXEXIT || state == 0 || iflag == 0 || ! rootshell)
+		s = state;
+		if (e == EXEXIT || s == 0 || iflag == 0 || shlvl)
 			exitshell();
 
 		if (e == EXINT
@@ -159,11 +131,11 @@ main(int argc, char **argv)
 		}
 		popstackmark(&smark);
 		FORCEINTON;				/* enable interrupts */
-		if (state == 1)
+		if (s == 1)
 			goto state1;
-		else if (state == 2)
+		else if (s == 2)
 			goto state2;
-		else if (state == 3)
+		else if (s == 3)
 			goto state3;
 		else
 			goto state4;
@@ -174,7 +146,6 @@ main(int argc, char **argv)
 	trputs("Shell args:  ");  trargs(argv);
 #endif
 	rootpid = getpid();
-	rootshell = 1;
 	init();
 	setstackmark(&smark);
 	procargs(argc, argv);
@@ -200,7 +171,7 @@ state2:
 state3:
 	state = 4;
 	if (minusc)
-		evalstring(minusc);
+		evalstring(minusc, 0);
 
 	if (sflag || minusc == NULL) {
 state4:	/* XXX ??? - why isn't this before the "if" statement */
@@ -225,7 +196,7 @@ state4:	/* XXX ??? - why isn't this before the "if" statement */
  * loop; it turns on prompting if the shell is interactive.
  */
 
-void
+static int
 cmdloop(int top)
 {
 	union node *n;
@@ -239,9 +210,9 @@ cmdloop(int top)
 		hetio_init();
 #endif
 	for (;;) {
+		int skip;
+
 		setstackmark(&smark);
-		if (pendingsigs)
-			dotrap();
 		if (jobctl)
 			showjobs(out2, SHOW_CHANGED);
 		inter = 0;
@@ -260,17 +231,21 @@ cmdloop(int top)
 				out2str("\nUse \"exit\" to leave shell.\n");
 			}
 			numeof++;
-		} else if (n != NULL && nflag == 0) {
+		} else if (nflag == 0) {
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
 			evaltree(n, 0);
 		}
 		popstackmark(&smark);
-		if (evalskip) {
+
+		skip = evalskip;
+		if (skip) {
 			evalskip = 0;
-			break;
+			return skip & SKIPEVAL;
 		}
 	}
+
+	return 0;
 }
 
 
@@ -282,31 +257,16 @@ cmdloop(int top)
 STATIC void
 read_profile(const char *name)
 {
-	int fd;
-	int xflag_set = 0;
-	int vflag_set = 0;
+	int skip;
 
-	INTOFF;
-	if ((fd = open(name, O_RDONLY)) >= 0)
-		setinputfd(fd, 1);
-	INTON;
-	if (fd < 0)
+	if (setinputfile(name, INPUT_PUSH_FILE | INPUT_NOFILE_OK) < 0)
 		return;
-	/* -q turns off -x and -v just when executing init files */
-	if (qflag)  {
-	    if (xflag)
-		    xflag = 0, xflag_set = 1;
-	    if (vflag)
-		    vflag = 0, vflag_set = 1;
-	}
-	cmdloop(0);
-	if (qflag)  {
-	    if (xflag_set)
-		    xflag = 1;
-	    if (vflag_set)
-		    vflag = 1;
-	}
+
+	skip = cmdloop(0);
 	popfile();
+
+	if (skip)
+		exitshell();
 }
 
 
@@ -318,14 +278,7 @@ read_profile(const char *name)
 void
 readcmdfile(char *name)
 {
-	int fd;
-
-	INTOFF;
-	if ((fd = open(name, O_RDONLY)) >= 0)
-		setinputfd(fd, 1);
-	else
-		error("Can't open %s", name);
-	INTON;
+	setinputfile(name, INPUT_PUSH_FILE);
 	cmdloop(0);
 	popfile();
 }
@@ -361,28 +314,26 @@ find_dot_file(char *basename)
 	}
 
 	/* not found in the PATH */
-	error("%s: not found", basename);
+	sh_error("%s: not found", basename);
 	/* NOTREACHED */
 }
 
 int
 dotcmd(int argc, char **argv)
 {
-	exitstatus = 0;
+	int status = 0;
 
 	if (argc >= 2) {		/* That's what SVR2 does */
 		char *fullname;
-		struct stackmark smark;
 
-		setstackmark(&smark);
 		fullname = find_dot_file(argv[1]);
-		setinputfile(fullname, 1);
+		setinputfile(fullname, INPUT_PUSH_FILE);
 		commandname = fullname;
 		cmdloop(0);
 		popfile();
-		popstackmark(&smark);
+		status = exitstatus;
 	}
-	return exitstatus;
+	return status;
 }
 
 

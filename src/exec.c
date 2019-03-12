@@ -1,8 +1,8 @@
-/*	$NetBSD: exec.c,v 1.35 2003/01/22 20:36:04 dsl Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,21 +32,11 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)exec.c	8.4 (Berkeley) 6/8/95";
-#else
-__RCSID("$NetBSD: exec.c,v 1.35 2003/01/22 20:36:04 dsl Exp $");
-#endif
-#endif /* not lint */
-
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdlib.h>
-#include <sysexits.h>
 #include <paths.h>
 
 /*
@@ -72,7 +58,6 @@ __RCSID("$NetBSD: exec.c,v 1.35 2003/01/22 20:36:04 dsl Exp $");
 #include "builtins.h"
 #include "var.h"
 #include "options.h"
-#include "input.h"
 #include "output.h"
 #include "syntax.h"
 #include "memalloc.h"
@@ -82,6 +67,7 @@ __RCSID("$NetBSD: exec.c,v 1.35 2003/01/22 20:36:04 dsl Exp $");
 #include "show.h"
 #include "jobs.h"
 #include "alias.h"
+#include "system.h"
 
 
 #define CMDTABLESIZE 31		/* should be prime */
@@ -100,7 +86,6 @@ struct tblentry {
 
 STATIC struct tblentry *cmdtable[CMDTABLESIZE];
 STATIC int builtinloc = -1;		/* index in path of %builtin, or -1 */
-int exerrno;				/* Last exec error */
 
 
 STATIC void tryexec(char *, char **, char **);
@@ -123,6 +108,7 @@ shellexec(char **argv, const char *path, int idx)
 	char *cmdname;
 	int e;
 	char **envp;
+	int exerrno;
 
 	clearredir(1);
 	envp = environment();
@@ -153,6 +139,7 @@ shellexec(char **argv, const char *path, int idx)
 		exerrno = 2;
 		break;
 	}
+	exitstatus = exerrno;
 	TRACE(("shellexec failed for %s, errno %d, suppressint %d\n",
 		argv[0], e, suppressint ));
 	exerror(EXEXEC, "%s: %s", argv[0], errmsg(e, E_EXEC));
@@ -429,7 +416,8 @@ loop:
 			readcmdfile(fullname);
 			if ((cmdp = cmdlookup(name, 0)) == NULL ||
 			    cmdp->cmdtype != CMDFUNCTION)
-				error("%s not defined in %s", name, fullname);
+				sh_error("%s not defined in %s", name,
+					 fullname);
 			stunalloc(fullname);
 			goto success;
 		}
@@ -859,41 +847,23 @@ commandcmd(argc, argv)
 	char **argv;
 {
 	int c;
-	int default_path = 0;
-	int verify_only = 0;
-	int verbose_verify_only = 0;
+	enum {
+		VERIFY_BRIEF = 1,
+		VERIFY_VERBOSE = 2,
+	} verify = 0;
 
 	while ((c = nextopt("pvV")) != '\0')
-		switch (c) {
-		default:
+		if (c == 'V')
+			verify |= VERIFY_VERBOSE;
+		else if (c == 'v')
+			verify |= VERIFY_BRIEF;
 #ifdef DEBUG
-			outfmt(out2,
-"command: nextopt returned character code 0%o\n", c);
-			return EX_SOFTWARE;
+		else if (c != 'p')
+			abort();
 #endif
-		case 'p':
-			default_path = 1;
-			break;
-		case 'v':
-			verify_only = 1;
-			break;
-		case 'V':
-			verbose_verify_only = 1;
-			break;
-		}
 
-	if (default_path + verify_only + verbose_verify_only > 1 ||
-	    !*argptr) {
-			outfmt(out2,
-"command [-p] command [arg ...]\n");
-			outfmt(out2,
-"command {-v|-V} command\n");
-			return EX_USAGE;
-	}
-
-	if (verify_only || verbose_verify_only) {
-		return describe_command(out1, *argptr, verbose_verify_only);
-	}
+	if (verify)
+		return describe_command(out1, *argptr, verify - VERIFY_BRIEF);
 
 	return 0;
 }

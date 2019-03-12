@@ -1,8 +1,8 @@
-/*	$NetBSD: main.h,v 1.9 2002/11/24 22:35:41 christos Exp $	*/
-
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1997-2005
+ *	Herbert Xu <herbert@gondor.apana.org.au>.  All rights reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * Kenneth Almquist.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,8 +38,10 @@
 
 /* pid of main shell */
 extern int rootpid;
-/* true if we aren't a child of the main shell */
-extern int rootshell;
+/* shell level: 0 for the main shell, 1 for its children, and so on */
+extern int shlvl;
+#define rootshell (!shlvl)
+
 #ifdef __GLIBC__
 /* glibc sucks */
 extern int *dash_errno;
@@ -52,6 +50,5 @@ extern int *dash_errno;
 #endif
 
 void readcmdfile(char *);
-void cmdloop(int);
 int dotcmd(int, char **);
 int exitcmd(int, char **);

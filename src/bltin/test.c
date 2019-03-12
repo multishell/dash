@@ -1,5 +1,3 @@
-/* $NetBSD: test.c,v 1.25 2002/05/25 23:12:16 wiz Exp $ */
-
 /*
  * test(1); version 7-like  --  author Erik Baalbergen
  * modified by Eric Gisin to be used as built-in.
@@ -10,16 +8,10 @@
  * This program is in the Public Domain.
  */
 
-#include <sys/cdefs.h>
-#ifndef lint
-__RCSID("$NetBSD: test.c,v 1.25 2002/05/25 23:12:16 wiz Exp $");
-#endif
-
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <ctype.h>
-#include <err.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -157,41 +149,14 @@ static int getn(const char *);
 static int newerf(const char *, const char *);
 static int olderf(const char *, const char *);
 static int equalf(const char *, const char *);
-static int test_eaccess(const char *, int);
+static int test_st_mode(const struct stat64 *, int);
 static int bash_group_member(gid_t);
-
-#ifndef SHELL
-static void error(const char *, ...) __attribute__((__noreturn__));
-
-static void
-error(const char *msg, ...)
-{
-	va_list ap;
-
-	va_start(ap, msg);
-	verrx(2, msg, ap);
-	/*NOTREACHED*/
-	va_end(ap);
-}
-#endif
-
-#ifdef SHELL
-int testcmd(int, char **);
 
 int
 testcmd(int argc, char **argv)
-#else
-int main(int, char *[]);
-
-int
-main(int argc, char *argv[])
-#endif
 {
 	int res;
 
-#ifndef SHELL
-	setprogname(argv[0]);
-#endif
 	if (strcmp(argv[0], "[") == 0) {
 		if (strcmp(argv[--argc], "]"))
 			error("missing ]");
@@ -304,6 +269,11 @@ binop(void)
 		syntax(op->op_text, "argument expected");
 		
 	switch (op->op_num) {
+	default:
+#ifdef DEBUG
+		abort();
+		/* NOTREACHED */
+#endif
 	case STREQ:
 		return strcmp(opnd1, opnd2) == 0;
 	case STRNE:
@@ -330,9 +300,6 @@ binop(void)
 		return olderf (opnd1, opnd2);
 	case FILEQ:
 		return equalf (opnd1, opnd2);
-	default:
-		abort();
-		/* NOTREACHED */
 	}
 }
 
@@ -346,11 +313,11 @@ filstat(char *nm, enum token mode)
 
 	switch (mode) {
 	case FILRD:
-		return test_eaccess(nm, R_OK) == 0;
+		return test_st_mode(&s, R_OK);
 	case FILWR:
-		return test_eaccess(nm, W_OK) == 0;
+		return test_st_mode(&s, W_OK);
 	case FILEX:
-		return test_eaccess(nm, X_OK) == 0;
+		return test_st_mode(&s, X_OK);
 	case FILEXIST:
 		return 1;
 	case FILREG:
@@ -374,7 +341,7 @@ filstat(char *nm, enum token mode)
 	case FILSTCK:
 		return (s.st_mode & S_ISVTX) != 0;
 	case FILGZ:
-		return s.st_size > (off_t)0;
+		return !!s.st_size;
 	case FILUID:
 		return s.st_uid == geteuid();
 	case FILGID:
@@ -482,38 +449,30 @@ equalf (const char *f1, const char *f2)
 		b1.st_ino == b2.st_ino);
 }
 
-/* Do the same thing access(2) does, but use the effective uid and gid,
-   and don't make the mistake of telling root that any file is
-   executable. */
+/*
+ * Similar to what access(2) does, but uses the effective uid and gid.
+ * Doesn't make the mistake of telling root that any file is executable.
+ * Returns non-zero if the file is accessible.
+ */
 static int
-test_eaccess(const char *path, int mode)
+test_st_mode(const struct stat64 *st, int mode)
 {
-	struct stat64 st;
 	int euid = geteuid();
-
-	if (stat64(path, &st) < 0)
-		return (-1);
 
 	if (euid == 0) {
 		/* Root can read or write any file. */
 		if (mode != X_OK)
-		return (0);
+			return 1;
 
 		/* Root can execute any file that has any one of the execute
 		   bits set. */
-		if (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH))
-			return (0);
-	}
-
-	if (st.st_uid == euid)		/* owner */
+		mode = S_IXUSR | S_IXGRP | S_IXOTH;
+	} else if (st->st_uid == euid)
 		mode <<= 6;
-	else if (bash_group_member(st.st_gid))
+	else if (bash_group_member(st->st_gid))
 		mode <<= 3;
 
-	if (st.st_mode & mode)
-		return (0);
-
-	return (-1);
+	return st->st_mode & mode;
 }
 
 /* Return non-zero if GID is one that we have in our groups list. */
@@ -529,11 +488,7 @@ bash_group_member(gid_t gid)
 		return (1);
 
 	ngroups = getgroups(0, NULL);
-#ifdef SHELL
 	group_array = stalloc(ngroups * sizeof(gid_t));
-#else
-	group_array = alloca(ngroups * sizeof(gid_t));
-#endif
 	getgroups(ngroups, group_array);
 
 	/* Search through the list looking for GID. */
