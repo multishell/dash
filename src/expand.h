@@ -34,6 +34,8 @@
  *	@(#)expand.h	8.2 (Berkeley) 5/4/95
  */
 
+#include <stdint.h>
+
 struct strlist {
 	struct strlist *next;
 	char *text;
@@ -53,14 +55,13 @@ struct arglist {
 #define	EXP_VARTILDE	0x4	/* expand tildes in an assignment */
 #define	EXP_REDIR	0x8	/* file glob for a redirection (1 match only) */
 #define EXP_CASE	0x10	/* keeps quotes around for CASE pattern */
-#define EXP_RECORD	0x20	/* need to record arguments for ifs breakup */
+#define EXP_QPAT	0x20	/* pattern in quoted parameter expansion */
 #define EXP_VARTILDE2	0x40	/* expand tildes after colons only */
 #define EXP_WORD	0x80	/* expand word in parameter expansion */
-#define EXP_QWORD	0x100	/* expand word in quoted parameter expansion */
+#define EXP_QUOTED	0x100	/* expand word in double quotes */
 
 
 union node;
-void expandhere(union node *, int);
 void expandarg(union node *, struct arglist *, int);
 void expari(int);
 #define rmescapes(p) _rmescapes((p), 0)
@@ -68,7 +69,7 @@ char *_rmescapes(char *, int);
 int casematch(union node *, char *);
 
 /* From arith.y */
-int arith(const char *);
+intmax_t arith(const char *);
 int expcmd(int , char **);
 #ifdef USE_LEX
 void arith_lex_reset(void);
