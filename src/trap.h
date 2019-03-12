@@ -37,7 +37,7 @@
 #include <signal.h>
 
 extern char *trap[];
-extern char gotsig[];
+extern char sigmode[];
 extern volatile sig_atomic_t pendingsigs;
 
 int trapcmd(int, char **);
